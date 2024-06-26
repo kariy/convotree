@@ -20,21 +20,29 @@ type Checkpoint struct {
 	ID       string
 	Exchange Exchange
 	ParentID string
-	BranchName string  // New field for branch name
+}
+
+type Branch struct {
+	Name string
+	HEAD string // Checkpoint ID
 }
 
 type ConversationTree struct {
-	checkpoints       map[string]Checkpoint
-	currentCheckpoint string
-	branchNames       map[string]string  // Map of branch names to checkpoint IDs
-	mu                sync.RWMutex
+	checkpoints     map[string]Checkpoint
+	branches        map[string]Branch
+	currentBranch   string
+	mu              sync.RWMutex
 }
 
 func NewConversationTree() *ConversationTree {
-	return &ConversationTree{
+	ct := &ConversationTree{
 		checkpoints: make(map[string]Checkpoint),
-		branchNames: make(map[string]string),
+		branches:    make(map[string]Branch),
 	}
+	// Create initial "main" branch
+	ct.branches["main"] = Branch{Name: "main", HEAD: ""}
+	ct.currentBranch = "main"
+	return ct
 }
 
 func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
@@ -48,47 +56,49 @@ func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
 			UserInput:  userInput,
 			AIResponse: aiResponse,
 		},
-		ParentID: ct.currentCheckpoint,
+		ParentID: ct.branches[ct.currentBranch].HEAD,
 	}
 
 	ct.checkpoints[id] = checkpoint
-	ct.currentCheckpoint = id
+	
+	// Update the HEAD of the current branch
+	branch := ct.branches[ct.currentBranch]
+	branch.HEAD = id
+	ct.branches[ct.currentBranch] = branch
+
 	return id
 }
 
-func (ct *ConversationTree) CreateBranch(fromCheckpointID string, branchName string) (string, error) {
+func (ct *ConversationTree) CreateBranch(branchName string, fromBranch string) error {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
-	if _, exists := ct.checkpoints[fromCheckpointID]; !exists {
-		return "", fmt.Errorf("invalid checkpoint ID")
+	if _, exists := ct.branches[branchName]; exists {
+		return fmt.Errorf("branch %s already exists", branchName)
 	}
 
-	if _, exists := ct.branchNames[branchName]; exists {
-		return "", fmt.Errorf("branch name already exists")
+	parentBranch, exists := ct.branches[fromBranch]
+	if !exists {
+		return fmt.Errorf("parent branch %s does not exist", fromBranch)
 	}
 
-	ct.currentCheckpoint = fromCheckpointID
-	ct.branchNames[branchName] = fromCheckpointID
+	ct.branches[branchName] = Branch{
+		Name: branchName,
+		HEAD: parentBranch.HEAD,
+	}
 
-	// Update the checkpoint with the branch name
-	checkpoint := ct.checkpoints[fromCheckpointID]
-	checkpoint.BranchName = branchName
-	ct.checkpoints[fromCheckpointID] = checkpoint
-
-	return fromCheckpointID, nil
+	return nil
 }
 
 func (ct *ConversationTree) SwitchBranch(branchName string) error {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
-	checkpointID, exists := ct.branchNames[branchName]
-	if !exists {
-		return fmt.Errorf("branch name not found")
+	if _, exists := ct.branches[branchName]; !exists {
+		return fmt.Errorf("branch %s does not exist", branchName)
 	}
 
-	ct.currentCheckpoint = checkpointID
+	ct.currentBranch = branchName
 	return nil
 }
 
@@ -97,7 +107,7 @@ func (ct *ConversationTree) GetConversationHistory() []Exchange {
 	defer ct.mu.RUnlock()
 
 	var history []Exchange
-	currentID := ct.currentCheckpoint
+	currentID := ct.branches[ct.currentBranch].HEAD
 
 	for currentID != "" {
 		checkpoint := ct.checkpoints[currentID]
@@ -108,26 +118,22 @@ func (ct *ConversationTree) GetConversationHistory() []Exchange {
 	return history
 }
 
-func (ct *ConversationTree) GetCheckpointIDs() []string {
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
-
-	ids := make([]string, 0, len(ct.checkpoints))
-	for id := range ct.checkpoints {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
 func (ct *ConversationTree) GetBranchNames() []string {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
 
-	names := make([]string, 0, len(ct.branchNames))
-	for name := range ct.branchNames {
+	names := make([]string, 0, len(ct.branches))
+	for name := range ct.branches {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (ct *ConversationTree) GetCurrentBranch() string {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	return ct.currentBranch
 }
 
 // Main function and CLI implementation would go here
@@ -143,13 +149,13 @@ func getAIResponse(_ []Exchange) (string, error) {
 	}
 	return strings.TrimSpace(sb.String()), nil
 }
-
 func main() {
 	ct := NewConversationTree()
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		fmt.Print("Enter command (chat/branch/switch/list/history/quit): ")
+		fmt.Printf("Current branch: %s\n", ct.GetCurrentBranch())
+		fmt.Print("Enter command (chat/branch/switch/list/quit): ")
 		scanner.Scan()
 		command := strings.ToLower(strings.TrimSpace(scanner.Text()))
 
@@ -170,19 +176,22 @@ func main() {
 			fmt.Printf("New checkpoint created: %s\n", newCheckpointID)
 
 		case "branch":
-			fmt.Print("Enter checkpoint ID to branch from: ")
-			scanner.Scan()
-			checkpointID := scanner.Text()
-
 			fmt.Print("Enter a name for the new branch: ")
 			scanner.Scan()
-			branchName := scanner.Text()
+			newBranchName := scanner.Text()
 
-			branchedID, err := ct.CreateBranch(checkpointID, branchName)
+			fmt.Print("Enter the name of the branch to branch from (default: current branch): ")
+			scanner.Scan()
+			fromBranch := scanner.Text()
+			if fromBranch == "" {
+				fromBranch = ct.GetCurrentBranch()
+			}
+
+			err := ct.CreateBranch(newBranchName, fromBranch)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
-				fmt.Printf("Created branch '%s' from checkpoint: %s\n", branchName, branchedID)
+				fmt.Printf("Created branch '%s' from '%s'\n", newBranchName, fromBranch)
 			}
 
 		case "switch":
@@ -198,23 +207,10 @@ func main() {
 			}
 
 		case "list":
-			checkpoints := ct.GetCheckpointIDs()
-			fmt.Println("Available checkpoints:")
-			for _, checkpoint := range checkpoints {
-				fmt.Println(checkpoint)
-			}
-
 			branches := ct.GetBranchNames()
 			fmt.Println("Available branches:")
 			for _, branch := range branches {
 				fmt.Println(branch)
-			}
-
-		case "history":
-			history := ct.GetConversationHistory()
-			fmt.Println("Conversation history:")
-			for _, exchange := range history {
-				fmt.Printf("You: %s\nAI: %s\n\n", exchange.UserInput, exchange.AIResponse)
 			}
 
 		case "quit":
