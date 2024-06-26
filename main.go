@@ -20,17 +20,20 @@ type Checkpoint struct {
 	ID       string
 	Exchange Exchange
 	ParentID string
+	BranchName string  // New field for branch name
 }
 
 type ConversationTree struct {
 	checkpoints       map[string]Checkpoint
 	currentCheckpoint string
+	branchNames       map[string]string  // Map of branch names to checkpoint IDs
 	mu                sync.RWMutex
 }
 
 func NewConversationTree() *ConversationTree {
 	return &ConversationTree{
 		checkpoints: make(map[string]Checkpoint),
+		branchNames: make(map[string]string),
 	}
 }
 
@@ -53,7 +56,7 @@ func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
 	return id
 }
 
-func (ct *ConversationTree) CreateBranch(fromCheckpointID string) (string, error) {
+func (ct *ConversationTree) CreateBranch(fromCheckpointID string, branchName string) (string, error) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
@@ -61,8 +64,32 @@ func (ct *ConversationTree) CreateBranch(fromCheckpointID string) (string, error
 		return "", fmt.Errorf("invalid checkpoint ID")
 	}
 
+	if _, exists := ct.branchNames[branchName]; exists {
+		return "", fmt.Errorf("branch name already exists")
+	}
+
 	ct.currentCheckpoint = fromCheckpointID
+	ct.branchNames[branchName] = fromCheckpointID
+
+	// Update the checkpoint with the branch name
+	checkpoint := ct.checkpoints[fromCheckpointID]
+	checkpoint.BranchName = branchName
+	ct.checkpoints[fromCheckpointID] = checkpoint
+
 	return fromCheckpointID, nil
+}
+
+func (ct *ConversationTree) SwitchBranch(branchName string) error {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+
+	checkpointID, exists := ct.branchNames[branchName]
+	if !exists {
+		return fmt.Errorf("branch name not found")
+	}
+
+	ct.currentCheckpoint = checkpointID
+	return nil
 }
 
 func (ct *ConversationTree) GetConversationHistory() []Exchange {
@@ -92,9 +119,20 @@ func (ct *ConversationTree) GetCheckpointIDs() []string {
 	return ids
 }
 
+func (ct *ConversationTree) GetBranchNames() []string {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	names := make([]string, 0, len(ct.branchNames))
+	for name := range ct.branchNames {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Main function and CLI implementation would go here
 
-func getAIResponse(history []Exchange) (string, error) {
+func getAIResponse(_ []Exchange) (string, error) {
 	// Generate a random string of up to 10 words
 	words := []string{"apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "honeydew", "kiwi", "lemon"}
 	n := rand.Intn(10) + 1
@@ -111,7 +149,7 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		fmt.Print("Enter command (chat/branch/list/quit): ")
+		fmt.Print("Enter command (chat/branch/switch/list/history/quit): ")
 		scanner.Scan()
 		command := strings.ToLower(strings.TrimSpace(scanner.Text()))
 
@@ -136,11 +174,27 @@ func main() {
 			scanner.Scan()
 			checkpointID := scanner.Text()
 
-			branchedID, err := ct.CreateBranch(checkpointID)
+			fmt.Print("Enter a name for the new branch: ")
+			scanner.Scan()
+			branchName := scanner.Text()
+
+			branchedID, err := ct.CreateBranch(checkpointID, branchName)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 			} else {
-				fmt.Printf("Branched from checkpoint: %s\n", branchedID)
+				fmt.Printf("Created branch '%s' from checkpoint: %s\n", branchName, branchedID)
+			}
+
+		case "switch":
+			fmt.Print("Enter branch name to switch to: ")
+			scanner.Scan()
+			branchName := scanner.Text()
+
+			err := ct.SwitchBranch(branchName)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Printf("Switched to branch: %s\n", branchName)
 			}
 
 		case "list":
@@ -148,6 +202,19 @@ func main() {
 			fmt.Println("Available checkpoints:")
 			for _, checkpoint := range checkpoints {
 				fmt.Println(checkpoint)
+			}
+
+			branches := ct.GetBranchNames()
+			fmt.Println("Available branches:")
+			for _, branch := range branches {
+				fmt.Println(branch)
+			}
+
+		case "history":
+			history := ct.GetConversationHistory()
+			fmt.Println("Conversation history:")
+			for _, exchange := range history {
+				fmt.Printf("You: %s\nAI: %s\n\n", exchange.UserInput, exchange.AIResponse)
 			}
 
 		case "quit":
