@@ -39,8 +39,10 @@ func NewConversationTree() *ConversationTree {
 		checkpoints: make(map[string]Checkpoint),
 		branches:    make(map[string]Branch),
 	}
-	// Create initial "main" branch
-	ct.branches["main"] = Branch{Name: "main", HEAD: ""}
+	// Create initial checkpoint and "main" branch
+	initialID := uuid.New().String()
+	ct.checkpoints[initialID] = Checkpoint{ID: initialID, ParentID: ""}
+	ct.branches["main"] = Branch{Name: "main", HEAD: initialID}
 	ct.currentBranch = "main"
 	return ct
 }
@@ -69,7 +71,7 @@ func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
 	return id
 }
 
-func (ct *ConversationTree) CreateBranch(branchName string, fromBranch string) error {
+func (ct *ConversationTree) CreateBranch(branchName, checkpointID string) error {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
@@ -77,14 +79,13 @@ func (ct *ConversationTree) CreateBranch(branchName string, fromBranch string) e
 		return fmt.Errorf("branch %s already exists", branchName)
 	}
 
-	parentBranch, exists := ct.branches[fromBranch]
-	if !exists {
-		return fmt.Errorf("parent branch %s does not exist", fromBranch)
+	if _, exists := ct.checkpoints[checkpointID]; !exists {
+		return fmt.Errorf("checkpoint %s does not exist", checkpointID)
 	}
 
 	ct.branches[branchName] = Branch{
 		Name: branchName,
-		HEAD: parentBranch.HEAD,
+		HEAD: checkpointID,
 	}
 
 	return nil
@@ -136,8 +137,18 @@ func (ct *ConversationTree) GetCurrentBranch() string {
 	return ct.currentBranch
 }
 
-// Main function and CLI implementation would go here
+func (ct *ConversationTree) GetCheckpoints() []string {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
 
+	checkpoints := make([]string, 0, len(ct.checkpoints))
+	for id := range ct.checkpoints {
+		checkpoints = append(checkpoints, id)
+	}
+	return checkpoints
+}
+
+// TODO: This should be replaced with a real AI service
 func getAIResponse(_ []Exchange) (string, error) {
 	// Generate a random string of up to 10 words
 	words := []string{"apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "honeydew", "kiwi", "lemon"}
