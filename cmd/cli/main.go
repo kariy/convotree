@@ -38,9 +38,16 @@ func main() {
 			newCheckpointID := ct.AddExchange(userInput, aiResponse)
 			fmt.Printf("New checkpoint created: %s\n", newCheckpointID)
 
+		case "branch":
+
 			fmt.Print("Enter a name for the new branch: ")
 			scanner.Scan()
 			newBranchName := scanner.Text()
+
+			if newBranchName == "" {
+				fmt.Println("Error: Branch name cannot be empty")
+				continue
+			}
 
 			var id uuid.UUID
 			fmt.Print("Enter the checkpoint to branch from (leave blank for current HEAD): ")
@@ -68,6 +75,10 @@ func main() {
 				fmt.Printf("Error: %v\n", err1)
 			} else {
 				fmt.Printf("Created branch '%s' from checkpoint '%s'\n", newBranchName, id)
+				err := ct.SwitchBranch(newBranchName)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				}
 			}
 
 		case "switch":
@@ -88,7 +99,13 @@ func main() {
 			for _, branch := range branches {
 				fmt.Println(branch)
 			}
-
+		
+		case "log":
+			history := ct.GetConversationHistory()
+			fmt.Println("Conversation history for current branch:")
+			for _, exchange := range history {
+				fmt.Printf("User: %s\nAI: %s\n\n", exchange.UserInput, exchange.AIResponse)
+			}
 		case "quit":
 			return
 

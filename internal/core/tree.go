@@ -36,10 +36,7 @@ func NewConversationTree() *ConversationTree {
 		branches:    make(map[string]Branch),
 	}
 
-	// Create initial checkpoint and "main" branch
-	initialID := uuid.New()
-	ct.checkpoints[initialID] = Checkpoint{ID: initialID, ParentID: uuid.Nil}
-	ct.branches["main"] = Branch{Name: "main", HEAD: initialID}
+	ct.branches["main"] = Branch{Name: "main"}
 	ct.currentBranch = "main"
 
 	return ct
@@ -108,7 +105,7 @@ func (ct *ConversationTree) GetConversationHistory() []Exchange {
 	var history []Exchange
 	currentID := ct.branches[ct.currentBranch].HEAD
 
-	for true {
+	for {
 		if currentID == uuid.Nil {
 			break
 		}
@@ -161,3 +158,4 @@ func (ct *ConversationTree) GetCheckpoints() []uuid.UUID {
 	}
 	return checkpoints
 }
+
