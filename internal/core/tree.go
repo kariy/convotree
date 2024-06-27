@@ -13,41 +13,43 @@ type Exchange struct {
 }
 
 type Checkpoint struct {
-	ID       string
+	ID       uuid.UUID
 	Exchange Exchange
-	ParentID string
+	ParentID uuid.UUID
 }
 
 type Branch struct {
 	Name string
-	HEAD string // Checkpoint ID
+	HEAD uuid.UUID // Checkpoint ID
 }
 
 type ConversationTree struct {
-	checkpoints     map[string]Checkpoint
-	branches        map[string]Branch
-	currentBranch   string
-	mu              sync.RWMutex
+	checkpoints   map[uuid.UUID]Checkpoint
+	branches      map[string]Branch
+	currentBranch string
+	mu            sync.RWMutex
 }
 
 func NewConversationTree() *ConversationTree {
 	ct := &ConversationTree{
-		checkpoints: make(map[string]Checkpoint),
+		checkpoints: make(map[uuid.UUID]Checkpoint),
 		branches:    make(map[string]Branch),
 	}
+
 	// Create initial checkpoint and "main" branch
-	initialID := uuid.New().String()
-	ct.checkpoints[initialID] = Checkpoint{ID: initialID, ParentID: ""}
+	initialID := uuid.New()
+	ct.checkpoints[initialID] = Checkpoint{ID: initialID, ParentID: uuid.Nil}
 	ct.branches["main"] = Branch{Name: "main", HEAD: initialID}
 	ct.currentBranch = "main"
+
 	return ct
 }
 
-func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
+func (ct *ConversationTree) AddExchange(userInput, aiResponse string) uuid.UUID {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
-	id := uuid.New().String()
+	id := uuid.New()
 	checkpoint := Checkpoint{
 		ID: id,
 		Exchange: Exchange{
@@ -58,7 +60,7 @@ func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
 	}
 
 	ct.checkpoints[id] = checkpoint
-	
+
 	// Update the HEAD of the current branch
 	branch := ct.branches[ct.currentBranch]
 	branch.HEAD = id
@@ -67,7 +69,7 @@ func (ct *ConversationTree) AddExchange(userInput, aiResponse string) string {
 	return id
 }
 
-func (ct *ConversationTree) CreateBranch(branchName, checkpointID string) error {
+func (ct *ConversationTree) CreateBranch(branchName string, checkpointID uuid.UUID) error {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
@@ -106,7 +108,11 @@ func (ct *ConversationTree) GetConversationHistory() []Exchange {
 	var history []Exchange
 	currentID := ct.branches[ct.currentBranch].HEAD
 
-	for currentID != "" {
+	for true {
+		if currentID == uuid.Nil {
+			break
+		}
+
 		checkpoint := ct.checkpoints[currentID]
 		history = append([]Exchange{checkpoint.Exchange}, history...)
 		currentID = checkpoint.ParentID
@@ -126,6 +132,17 @@ func (ct *ConversationTree) GetBranchNames() []string {
 	return names
 }
 
+func (ct *ConversationTree) GetBranch(branchName string) (*Branch, error) {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	branch, exists := ct.branches[branchName]
+	if !exists {
+		return nil, fmt.Errorf("branch %s does not exist", branchName)
+	}
+
+	return &branch, nil
+}
 func (ct *ConversationTree) GetCurrentBranch() string {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
@@ -133,11 +150,12 @@ func (ct *ConversationTree) GetCurrentBranch() string {
 	return ct.currentBranch
 }
 
-func (ct *ConversationTree) GetCheckpoints() []string {
+
+func (ct *ConversationTree) GetCheckpoints() []uuid.UUID {
 	ct.mu.RLock()
 	defer ct.mu.RUnlock()
 
-	checkpoints := make([]string, 0, len(ct.checkpoints))
+	checkpoints := make([]uuid.UUID, 0, len(ct.checkpoints))
 	for id := range ct.checkpoints {
 		checkpoints = append(checkpoints, id)
 	}

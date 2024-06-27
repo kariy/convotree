@@ -8,6 +8,8 @@ import (
 
 	"convotree/internal/ai"
 	"convotree/internal/core"
+
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -36,23 +38,36 @@ func main() {
 			newCheckpointID := ct.AddExchange(userInput, aiResponse)
 			fmt.Printf("New checkpoint created: %s\n", newCheckpointID)
 
-		case "branch":
 			fmt.Print("Enter a name for the new branch: ")
 			scanner.Scan()
 			newBranchName := scanner.Text()
 
-			fmt.Print("Enter the name of the branch to branch from (default: current branch): ")
+			var id uuid.UUID
+			fmt.Print("Enter the checkpoint to branch from (leave blank for current HEAD): ")
 			scanner.Scan()
-			fromBranch := scanner.Text()
-			if fromBranch == "" {
-				fromBranch = ct.GetCurrentBranch()
-			}
+			fromBranchInput := scanner.Text()
 
-			err := ct.CreateBranch(newBranchName, fromBranch)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
+			if fromBranchInput == "" {
+				branch, err := ct.GetBranch(ct.GetCurrentBranch())
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+					continue
+				}
+				id = branch.HEAD
 			} else {
-				fmt.Printf("Created branch '%s' from '%s'\n", newBranchName, fromBranch)
+				var err error
+				id, err = uuid.Parse(fromBranchInput)
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+					continue
+				}
+			}
+			err1 := ct.CreateBranch(newBranchName, id)
+
+			if err1 != nil {
+				fmt.Printf("Error: %v\n", err1)
+			} else {
+				fmt.Printf("Created branch '%s' from checkpoint '%s'\n", newBranchName, id)
 			}
 
 		case "switch":
